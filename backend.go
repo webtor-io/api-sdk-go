@@ -104,14 +104,35 @@ func WebUI(apiKey string, opts ...WebUIOption) (Backend, error) {
 	}, nil
 }
 
+// RapidAPIOption configures the RapidAPI backend.
+type RapidAPIOption func(*rapidAPIConfig)
+
+type rapidAPIConfig struct {
+	baseURL string
+}
+
+// WithRapidAPIBaseURL overrides the marketplace endpoint (tests, mocks). The
+// X-RapidAPI-Host header keeps naming the real marketplace host.
+func WithRapidAPIBaseURL(u string) RapidAPIOption {
+	return func(c *rapidAPIConfig) { c.baseURL = u }
+}
+
 // RapidAPI returns the backend for the RapidAPI marketplace. key is the
 // consumer's X-RapidAPI-Key. Only the resource surface is available.
-func RapidAPI(key string) (Backend, error) {
-	base, err := parseBase(DefaultRapidAPIBaseURL)
+func RapidAPI(key string, opts ...RapidAPIOption) (Backend, error) {
+	cfg := rapidAPIConfig{baseURL: DefaultRapidAPIBaseURL}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	base, err := parseBase(cfg.baseURL)
 	if err != nil {
 		return nil, err
 	}
-	host := base.Host
+	defBase, err := parseBase(DefaultRapidAPIBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	host := defBase.Host
 	return &backend{
 		kind: KindRapidAPI,
 		base: base,
