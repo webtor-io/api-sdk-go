@@ -23,6 +23,9 @@ type LibrarySort string
 const (
 	LibrarySortRecent LibrarySort = "recent"
 	LibrarySortName   LibrarySort = "name"
+	// LibrarySortYear orders by release year; the API accepts it only for
+	// the movies and series sections.
+	LibrarySortYear LibrarySort = "year"
 )
 
 // LibraryListOptions parameterize LibraryList.
