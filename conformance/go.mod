@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/webtor-io/api-sdk-go v0.0.0
 	github.com/webtor-io/rest-api v1.0.1-0.20260702182913-e2204030bcdf
-	github.com/webtor-io/web-ui v0.0.0-20260810181024-07b7f6c1c178
+	github.com/webtor-io/web-ui v0.0.0-20260812170254-eee8277304ca
 )
 
 require (

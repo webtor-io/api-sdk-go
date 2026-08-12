@@ -173,6 +173,8 @@ type LibraryListResponse struct {
 	Offset int           `json:"offset"`
 	Type   string        `json:"type"`
 	Sort   string        `json:"sort"`
+	// Watched echoes the applied watched filter; empty when not filtering.
+	Watched string `json:"watched,omitempty"`
 }
 
 // VaultPoints is the account's Vault point balance. Total and Available are

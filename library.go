@@ -26,12 +26,26 @@ const (
 	// LibrarySortYear orders by release year; the API accepts it only for
 	// the movies and series sections.
 	LibrarySortYear LibrarySort = "year"
+	// LibrarySortRating orders by rating; movies and series sections only.
+	LibrarySortRating LibrarySort = "rating"
+)
+
+// LibraryWatched filters a library listing by watched state; the API accepts
+// the non-all values only for the movies and series sections.
+type LibraryWatched string
+
+const (
+	LibraryWatchedAll       LibraryWatched = "all"
+	LibraryWatchedWatched   LibraryWatched = "watched"
+	LibraryWatchedUnwatched LibraryWatched = "unwatched"
 )
 
 // LibraryListOptions parameterize LibraryList.
 type LibraryListOptions struct {
 	Type LibraryType // default all
 	Sort LibrarySort // default recent
+	// Watched filters by watched state (movies/series sections only).
+	Watched LibraryWatched // default all
 	// Limit is the page size; 0 keeps the server default (100, max 1000).
 	Limit  int
 	Offset int
@@ -48,6 +62,9 @@ func (c *Client) LibraryList(ctx context.Context, o LibraryListOptions) (*Librar
 	}
 	if o.Sort != "" {
 		q.Set("sort", string(o.Sort))
+	}
+	if o.Watched != "" && o.Watched != LibraryWatchedAll {
+		q.Set("watched", string(o.Watched))
 	}
 	if o.Limit > 0 {
 		q.Set("limit", strconv.Itoa(o.Limit))
