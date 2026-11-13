@@ -66,6 +66,33 @@ func TestDecodeErrorDialects(t *testing.T) {
 	}
 }
 
+func TestDecodeErrorCodeAndReason(t *testing.T) {
+	const txt = "private torrent: only a signed-in user who added it with their own tracker can play it"
+	for _, tc := range []struct {
+		name                          string
+		status                        int
+		body                          string
+		wantCode, wantReason, wantMsg string
+	}{
+		{"restapi code+reason", 403, `{"error":"` + txt + `","code":"private_torrent","reason":"no_record"}`, CodePrivateTorrent, ReasonNoRecord, txt},
+		{"restapi class reason", 422, `{"error":"tracker refused","code":"private_tracker_refused","reason":"key"}`, CodePrivateTrackerRefused, "key", "tracker refused"},
+		{"restapi code, empty text", 422, `{"error":"","code":"private_no_tracker"}`, CodePrivateNoTracker, "", ""},
+		{"restapi no code: status decides", 403, `{"error":"forbidden"}`, CodeForbidden, "", "forbidden"},
+		{"webui envelope reason", 403, `{"error":{"code":"private_torrent","message":"m","reason":"sign_in"}}`, CodePrivateTorrent, ReasonSignIn, "m"},
+		{"422 without code", 422, `{"error":"magnet of a private torrent"}`, CodeBadRequest, "", "magnet of a private torrent"},
+		{"rapidapi own 403", 403, `{"message":"You are not subscribed to this API."}`, CodeForbidden, "", "You are not subscribed to this API."},
+		{"empty 403 gateway", 403, ``, CodeForbidden, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := decodeError(tc.status, []byte(tc.body), http.Header{})
+			if e.Code != tc.wantCode || e.Reason != tc.wantReason || e.Message != tc.wantMsg || e.HTTPStatus != tc.status {
+				t.Errorf("got code=%q reason=%q msg=%q status=%d, want %q %q %q %d",
+					e.Code, e.Reason, e.Message, e.HTTPStatus, tc.wantCode, tc.wantReason, tc.wantMsg, tc.status)
+			}
+		})
+	}
+}
+
 func TestRetryAfterParsed(t *testing.T) {
 	hdr := http.Header{}
 	hdr.Set("Retry-After", "7")
@@ -346,6 +373,52 @@ func TestGetRetriedOnUpstreamError(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
 	}
+}
+
+// A code in a 5xx body must not switch off the status-based retry policy.
+func TestRetryKeysOnStatus(t *testing.T) {
+	t.Run("GET 503 with a body code is retried", func(t *testing.T) {
+		var calls int
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if calls == 1 {
+				w.WriteHeader(503)
+				_, _ = w.Write([]byte(`{"error":"x","code":"store_outdated"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"` + sintel + `","multi_file":true,"size":1,"files_count":1}`))
+		})
+		c := newTestClient(t, h, directAt())
+		c.retry.BaseWait = 2 * time.Millisecond
+		if _, err := c.Resource(context.Background(), sintel); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 2 {
+			t.Errorf("calls = %d, want 2", calls)
+		}
+	})
+
+	// Every re-POST of a private magnet is another announce to the user's
+	// tracker: the caller decides, after Retry-After.
+	t.Run("POST 503 private_verify_unavailable is not retried", func(t *testing.T) {
+		var calls int
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(503)
+			_, _ = w.Write([]byte(`{"error":"x","code":"private_verify_unavailable"}`))
+		})
+		c := newTestClient(t, h, directAt())
+		_, err := c.AddResource(context.Background(),
+			Magnet("magnet:?xt=urn:btih:"+sintel+"&tr=http%3A%2F%2Ftracker.example%2Fannounce"))
+		if calls != 1 {
+			t.Errorf("calls = %d, want 1 (no retry)", calls)
+		}
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Code != CodePrivateVerifyUnavailable || ae.RetryAfter != 5*time.Second {
+			t.Errorf("err = %#v", err)
+		}
+	})
 }
 
 func TestErrorPredicates(t *testing.T) {

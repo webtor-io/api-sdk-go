@@ -119,7 +119,9 @@ func (c *Client) Resource(ctx context.Context, resourceID string) (*ResourceResp
 	return &out, nil
 }
 
-// TorrentFile returns the raw .torrent bytes of a stored resource.
+// TorrentFile returns the raw .torrent bytes of a stored resource. For a
+// private torrent it fails with an *Error whose Code is
+// CodePrivateTorrentFile, even for the account that added it.
 func (c *Client) TorrentFile(ctx context.Context, resourceID string) ([]byte, error) {
 	return c.doRaw(ctx, apiRequest{
 		method: http.MethodGet,

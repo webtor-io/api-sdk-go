@@ -29,7 +29,8 @@ func DefaultRetryPolicy() RetryPolicy {
 }
 
 // shouldRetry decides whether err from a method call warrants another
-// attempt, and after what wait.
+// attempt, and after what wait. An API error is matched by its code and by
+// its HTTP status, so a specific code in a 5xx body keeps the retry.
 func (p RetryPolicy) shouldRetry(method string, err error) (time.Duration, bool) {
 	idempotent := method == http.MethodGet || method == http.MethodHead
 
@@ -41,18 +42,20 @@ func (p RetryPolicy) shouldRetry(method string, err error) (time.Duration, bool)
 	if !errors.As(err, &ae) {
 		return 0, false
 	}
-	switch ae.Code {
-	case CodeRateLimited:
-		wait := ae.RetryAfter
-		if wait <= 0 {
-			wait = p.backoff()
+	for _, code := range []string{ae.Code, codeFromStatus(ae.HTTPStatus)} {
+		switch code {
+		case CodeRateLimited:
+			wait := ae.RetryAfter
+			if wait <= 0 {
+				wait = p.backoff()
+			}
+			if wait > p.MaxWait {
+				wait = p.MaxWait
+			}
+			return wait, true
+		case CodeUpstream, CodeUnavailable, CodeUpstreamTimeout:
+			return p.backoff(), idempotent
 		}
-		if wait > p.MaxWait {
-			wait = p.MaxWait
-		}
-		return wait, true
-	case CodeUpstream, CodeUnavailable, CodeUpstreamTimeout:
-		return p.backoff(), idempotent
 	}
 	return 0, false
 }

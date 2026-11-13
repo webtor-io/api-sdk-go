@@ -22,15 +22,23 @@ type downloadFake struct {
 	cutAt int
 	// expireOldGens makes any generation but the latest answer 403.
 	expireOldGens bool
-	gen           int
-	exports       int
-	rangesSeen    []string
+	// refuseExportsAfter makes every export past the first n answer 403
+	// private_torrent/no_record (the record was deleted mid-download).
+	refuseExportsAfter int
+	gen                int
+	exports            int
+	rangesSeen         []string
 }
 
 func (f *downloadFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(r.URL.Path, "/export/"):
 		f.exports++
+		if f.refuseExportsAfter > 0 && f.exports > f.refuseExportsAfter {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(restBody(CodePrivateTorrent, ReasonNoRecord)))
+			return
+		}
 		f.gen++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"source": map[string]any{
