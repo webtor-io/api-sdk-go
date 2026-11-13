@@ -7,10 +7,19 @@
 // the SDK type and back, then compares the canonical JSON. A new upstream
 // field, a renamed tag or a changed omitempty shows up as a diff here before
 // it shows up as silent data loss in a client.
+//
+// Run it with GOLANG_PROTOBUF_REGISTRATION_CONFLICT=ignore (CI does): the
+// upstream graph links claims-provider's and torrent-store's protos, which
+// have no proto package and both declare Tier, so the default policy panics
+// at init. web-ui builds with the same policy.
 package conformance
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
@@ -72,7 +81,52 @@ func TestResourceResponse(t *testing.T) {
 		File:       &f,
 		Size:       123456,
 		FilesCount: 1,
+		Private:    true,
+		Verified:   "accepted",
 	}, &webtor.ResourceResponse{})
+}
+
+// TestErrorDialects feeds each upstream's own error type, as it marshals it,
+// through the SDK client: a private refusal keeps its code, reason and
+// message on both dialects.
+func TestErrorDialects(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body any
+		mk   func(string) (webtor.Backend, error)
+	}{
+		{"restapi", ra.ErrorResponse{Error: "refused", Code: "private_torrent", Reason: "no_record"},
+			func(u string) (webtor.Backend, error) { return webtor.Direct(u) }},
+		{"webui", libapi.ErrorResponse{Error: libapi.Error{Code: "private_torrent", Message: "refused", Reason: "no_record"}},
+			func(u string) (webtor.Backend, error) {
+				return webtor.WebUI("0123456789abcdef", webtor.WithWebUIBaseURL(u))
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write(body)
+			}))
+			defer srv.Close()
+			b, err := tc.mk(srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := webtor.New(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = c.Resource(context.Background(), "08ada5a7a6183aae1e09d831df6748d566095a10")
+			var ae *webtor.Error
+			if !errors.As(err, &ae) || ae.Code != webtor.CodePrivateTorrent || ae.Reason != webtor.ReasonNoRecord || ae.Message != "refused" {
+				t.Errorf("body %s: err = %#v", body, err)
+			}
+		})
+	}
 }
 
 func TestListResponse(t *testing.T) {

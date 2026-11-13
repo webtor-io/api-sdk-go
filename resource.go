@@ -244,6 +244,8 @@ type ExportOptions struct {
 // directory's ID for archive downloads. Every entry of the result map is
 // optional — an export that does not apply to the file is silently absent.
 // The URLs expire: resolve immediately before use and never persist them.
+// For a private torrent the URLs carry a token bound to the account and
+// expire after at most 24 hours; OpenDownload re-resolves them when resuming.
 func (c *Client) Export(ctx context.Context, resourceID, contentID string, o ExportOptions) (*ExportResponse, error) {
 	q := url.Values{}
 	if len(o.Types) > 0 {

@@ -29,6 +29,12 @@ type ResourceResponse struct {
 	Size int64 `json:"size"`
 	// FilesCount is the number of files in the torrent.
 	FilesCount int `json:"files_count"`
+	// Private reports that the torrent sets the BEP 27 private flag. A
+	// server without private-torrent support omits it, which reads as false.
+	Private bool `json:"private"`
+	// Verified is "accepted" when a magnet with tr= for an already stored
+	// private torrent passed the tracker check; empty otherwise.
+	Verified string `json:"verified,omitempty"`
 }
 
 // ListType discriminates entries of a torrent listing.

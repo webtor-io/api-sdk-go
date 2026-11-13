@@ -33,8 +33,9 @@ offers; unsupported calls fail fast with a `*CapabilityError`.
 ## Highlights
 
 - **Normalized errors** — every non-2xx becomes `*webtor.Error` with a stable
-  `Code` (`not_found`, `payment_required`, `rate_limited`, …) regardless of the
-  backend's wire dialect. Predicates: `webtor.IsNotFound(err)` etc.
+  `Code` (`not_found`, `payment_required`, `rate_limited`, …) and, where the
+  server refines it, a `Reason`, regardless of the backend's wire dialect.
+  Predicates: `webtor.IsNotFound(err)` etc.
 - **Device-flow login** — `StartDeviceAuth` + `WaitDeviceToken` implement the
   RFC 8628 polling protocol; the person confirms a short code on webtor.io and
   the SDK returns a fresh per-device API key. See `examples/device-login`.
@@ -46,6 +47,54 @@ offers; unsupported calls fail fast with a `*CapabilityError`.
 
 More runnable examples in [`examples/`](examples/). The wire types are pinned
 to the upstream services by the [`conformance/`](conformance/) test module.
+
+## Private torrents
+
+A private torrent (BEP 27 private flag, `ResourceResponse.Private`) plays only
+for the account that added it with its own tracker. `ResourceResponse.Verified`
+is `"accepted"` when a magnet with `tr=` for an already stored private torrent
+passed the tracker check.
+
+Refusals carry their own codes on every backend:
+
+| `Code` | Status | When | Constant |
+|---|---|---|---|
+| `private_torrent` | 403 | the caller may not read this torrent; `Reason` says why | `CodePrivateTorrent` |
+| `private_torrent_file` | 403 | `TorrentFile` of a private torrent: its `.torrent` is never served | `CodePrivateTorrentFile` |
+| `private_needs_account` | 422 | adding a private torrent without an account | `CodePrivateNeedsAccount` |
+| `private_no_tracker` | 422 | the private torrent names no usable tracker | `CodePrivateNoTracker` |
+| `private_too_many_trackers` | 422 | the private torrent names more trackers than the server accepts | `CodePrivateTooManyTrackers` |
+| `private_magnet` | 422 | a magnet of a private torrent without `tr=`: add the `.torrent` file | `CodePrivateMagnet` |
+| `private_tracker_refused` | 422 | the tracker refused the key in a magnet's `tr=`; `Reason` is the refusal class | `CodePrivateTrackerRefused` |
+| `private_verify_unavailable` | 503 | the tracker check could not run; wait `RetryAfter`, the SDK does not repeat the add itself | `CodePrivateVerifyUnavailable` |
+| `private_unavailable` | 422 on add, 403 on access | this server does not support private torrents | `CodePrivateUnavailable` |
+
+`Reason` of `private_torrent`: `sign_in` (`webtor.ReasonSignIn`, the caller is
+anonymous), `no_record` (`webtor.ReasonNoRecord`, the account has not added
+this torrent with its own tracker) or `token_in_query`. Of
+`private_tracker_refused`: `key`, `account`, `unregistered`, `client` or
+`other`.
+
+```go
+_, err := c.Resource(ctx, id)
+var ae *webtor.Error
+if errors.As(err, &ae) && ae.Code == webtor.CodePrivateTorrent {
+    switch ae.Reason {
+    case webtor.ReasonSignIn:
+        // sign in, then try again
+    case webtor.ReasonNoRecord:
+        // add the .torrent file from your tracker with this account
+    }
+}
+```
+
+A private refusal is not `forbidden`: `webtor.IsForbidden(err)` is false for
+it, so branch on `Code`.
+
+Export URLs of a private torrent carry a token bound to the account and live at
+most 24 hours. Never store them; `OpenDownload` re-resolves them by itself when
+resuming. With the `Direct` backend, private torrents need `WithDirectToken`
+with a token that carries a `uid` claim; without it they are refused.
 
 ## License
 

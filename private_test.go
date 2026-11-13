@@ -115,3 +115,25 @@ func TestDownloadResumeKeepsPrivateError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A server before private-torrent support sends neither field: the zero
+// values read as "not private, not verified".
+func TestResourcePrivateFields(t *testing.T) {
+	bodies := []string{
+		`{"id":"` + sintel + `","multi_file":false,"size":1,"files_count":1,"private":true,"verified":"accepted"}`,
+		`{"id":"` + sintel + `","multi_file":false,"size":1,"files_count":1}`,
+	}
+	calls := 0
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(bodies[calls]))
+		calls++
+	}), directAt())
+	res, err := c.Resource(context.Background(), sintel)
+	if err != nil || !res.Private || res.Verified != "accepted" {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+	res, err = c.Resource(context.Background(), sintel)
+	if err != nil || res.Private || res.Verified != "" {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+}

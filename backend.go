@@ -158,7 +158,9 @@ func WithDirectAPIKey(k string) DirectOption {
 }
 
 // WithDirectToken sets the pass-through JWT that rest-api embeds into the
-// export URLs it generates.
+// export URLs it generates. Private torrents need a token that carries a uid
+// claim; without it they are refused (private_needs_account on add,
+// private_torrent with reason sign_in on access).
 func WithDirectToken(t string) DirectOption {
 	return func(c *directConfig) { c.token = t }
 }
