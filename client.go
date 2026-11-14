@@ -163,12 +163,12 @@ func (c *Client) doRaw(ctx context.Context, req apiRequest) ([]byte, error) {
 func (c *Client) attempt(hreq *http.Request) ([]byte, error) {
 	resp, err := c.hc.Do(hreq)
 	if err != nil {
-		return nil, &transportError{err: err}
+		return nil, newTransportError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return nil, &transportError{err: err}
+		return nil, newTransportError(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, decodeError(resp.StatusCode, body, resp.Header)
@@ -179,6 +179,22 @@ func (c *Client) attempt(hreq *http.Request) ([]byte, error) {
 // transportError wraps network-level failures (connection reset, DNS, TLS) so
 // the retry policy can tell them apart from API errors.
 type transportError struct{ err error }
+
+func newTransportError(err error) *transportError { return &transportError{err: redactURL(err)} }
+
+// redactURL drops the query from a *url.Error's URL: a private torrent's
+// export and stream URLs carry an account-bound token= valid up to 24 h,
+// which must not reach error strings or logs. The cause stays wrapped, so
+// errors.Is/As still see it.
+func redactURL(err error) error {
+	ue, ok := err.(*url.Error)
+	if !ok {
+		return err
+	}
+	cp := *ue
+	cp.URL, _, _ = strings.Cut(cp.URL, "?")
+	return &cp
+}
 
 func (e *transportError) Error() string { return "webtor: transport: " + e.err.Error() }
 func (e *transportError) Unwrap() error { return e.err }

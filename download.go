@@ -109,7 +109,7 @@ func (c *Client) OpenDownload(ctx context.Context, resourceID, contentID string,
 func (d *Download) open(url string) error {
 	req, err := http.NewRequestWithContext(d.ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return redactURL(err)
 	}
 	req.Header.Set("User-Agent", d.ua)
 	pos := d.offset + d.read.Load()
@@ -118,7 +118,7 @@ func (d *Download) open(url string) error {
 	}
 	resp, err := d.hc.Do(req)
 	if err != nil {
-		return &transportError{err: err}
+		return newTransportError(err)
 	}
 	switch {
 	case resp.StatusCode == http.StatusPartialContent:
@@ -130,7 +130,7 @@ func (d *Download) open(url string) error {
 			// than hand out duplicate bytes.
 			if _, err := io.CopyN(io.Discard, resp.Body, pos); err != nil {
 				_ = resp.Body.Close()
-				return &transportError{err: err}
+				return newTransportError(err)
 			}
 		}
 		d.body = resp.Body
@@ -227,12 +227,12 @@ func (c *Client) OpenArchive(ctx context.Context, resourceID, contentID string, 
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", redactURL(err)
 	}
 	req.Header.Set("User-Agent", c.ua)
 	hresp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, "", &transportError{err: err}
+		return nil, "", newTransportError(err)
 	}
 	if hresp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
