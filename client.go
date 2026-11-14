@@ -14,7 +14,7 @@ import (
 )
 
 // Version of the SDK, used in the default User-Agent.
-const Version = "0.1.0"
+const Version = "0.5.0"
 
 // Client talks to a webtor API backend. Construct with New; the zero value is
 // not usable. All methods are safe for concurrent use.
