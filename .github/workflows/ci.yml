@@ -17,6 +17,9 @@ jobs:
       - run: go test ./...
   conformance:
     runs-on: ubuntu-latest
+    env:
+      # claims-provider and torrent-store protos both declare Tier (see conformance_test.go)
+      GOLANG_PROTOBUF_REGISTRATION_CONFLICT: ignore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -3,14 +3,17 @@ package webtor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // downloadFake serves /resource/<id>/export/<cid> with a fresh short-lived
@@ -22,15 +25,23 @@ type downloadFake struct {
 	cutAt int
 	// expireOldGens makes any generation but the latest answer 403.
 	expireOldGens bool
-	gen           int
-	exports       int
-	rangesSeen    []string
+	// refuseExportsAfter makes every export past the first n answer 403
+	// private_torrent/no_record (the record was deleted mid-download).
+	refuseExportsAfter int
+	gen                int
+	exports            int
+	rangesSeen         []string
 }
 
 func (f *downloadFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(r.URL.Path, "/export/"):
 		f.exports++
+		if f.refuseExportsAfter > 0 && f.exports > f.refuseExportsAfter {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(restBody(CodePrivateTorrent, ReasonNoRecord)))
+			return
+		}
 		f.gen++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"source": map[string]any{
@@ -203,5 +214,73 @@ func TestOpenArchive(t *testing.T) {
 	}
 	if paths := gotQuery["paths"]; len(paths) != 2 {
 		t.Errorf("paths = %v", paths)
+	}
+}
+
+// TestFailedGETKeepsTokenOutOfError: a private torrent's export URL carries
+// an account-bound token= valid up to 24 h; a failed GET of it must not put
+// the token into the error, yet the cause must stay reachable.
+func TestFailedGETKeepsTokenOutOfError(t *testing.T) {
+	const secret = "s3cr3t-account-token"
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			<-r.Context().Done()
+			return
+		}
+		// The content ID (last path segment) picks how the GET fails.
+		u := map[string]string{
+			"dead": deadURL + "/dl",
+			"slow": "http://" + r.Host + "/slow",
+			"bad":  "http://127.0.0.1:bad/dl",
+		}[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"source":  map[string]any{"id": "a", "name": "movie.mkv", "path": "/movie.mkv", "type": "file", "size": 10},
+			"exports": map[string]any{"download": map[string]any{"url": u + "?token=" + secret}},
+		})
+	}))
+	defer srv.Close()
+	b, _ := Direct(srv.URL)
+	c, _ := New(b)
+
+	open := map[string]func(context.Context, string) error{
+		"OpenDownload": func(ctx context.Context, cid string) error {
+			_, err := c.OpenDownload(ctx, sintel, cid)
+			return err
+		},
+		"OpenArchive": func(ctx context.Context, cid string) error {
+			_, _, err := c.OpenArchive(ctx, sintel, cid, ArchiveFormatZip, nil)
+			return err
+		},
+	}
+	for name, fn := range open {
+		for _, cid := range []string{"dead", "slow", "bad"} {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			err := fn(ctx, cid)
+			cancel()
+			if err == nil {
+				t.Fatalf("%s %s: no error", name, cid)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("%s %s: token in error: %v", name, cid, err)
+			}
+			var ue *url.Error
+			if errors.As(err, &ue) && strings.Contains(ue.Error(), secret) {
+				t.Errorf("%s %s: token in *url.Error: %v", name, cid, ue)
+			}
+			switch cid {
+			case "dead":
+				var oe *net.OpError
+				if !errors.As(err, &oe) {
+					t.Errorf("%s dead: cause lost: %v", name, err)
+				}
+			case "slow":
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("%s slow: not DeadlineExceeded: %v", name, err)
+				}
+			}
+		}
 	}
 }

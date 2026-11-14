@@ -119,7 +119,9 @@ func (c *Client) Resource(ctx context.Context, resourceID string) (*ResourceResp
 	return &out, nil
 }
 
-// TorrentFile returns the raw .torrent bytes of a stored resource.
+// TorrentFile returns the raw .torrent bytes of a stored resource. For a
+// private torrent it fails with an *Error whose Code is
+// CodePrivateTorrentFile, even for the account that added it.
 func (c *Client) TorrentFile(ctx context.Context, resourceID string) ([]byte, error) {
 	return c.doRaw(ctx, apiRequest{
 		method: http.MethodGet,
@@ -242,6 +244,8 @@ type ExportOptions struct {
 // directory's ID for archive downloads. Every entry of the result map is
 // optional — an export that does not apply to the file is silently absent.
 // The URLs expire: resolve immediately before use and never persist them.
+// For a private torrent the URLs carry a token bound to the account and
+// expire after at most 24 hours; OpenDownload re-resolves them when resuming.
 func (c *Client) Export(ctx context.Context, resourceID, contentID string, o ExportOptions) (*ExportResponse, error) {
 	q := url.Values{}
 	if len(o.Types) > 0 {

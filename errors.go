@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// Error codes. The web-ui backend sends them verbatim; for the other dialects
-// (rest-api's bare string, RapidAPI's {"message"} and empty bodies) the code
-// is synthesized from the HTTP status, so callers can always branch on Code
+// Error codes. The web-ui backend sends them verbatim; when a body carries no
+// code (rest-api's bare {"error"}, RapidAPI's {"message"}, empty bodies) it is
+// synthesized from the HTTP status, so callers can always branch on Code
 // regardless of the backend.
 const (
 	CodeBadRequest           = "bad_request"
@@ -31,6 +31,29 @@ const (
 	CodeUpstreamTimeout      = "upstream_timeout"
 )
 
+// Private torrent codes, sent by rest-api and passed through by the web-ui
+// and RapidAPI backends. Error.Reason refines some of them.
+const (
+	CodePrivateTorrent           = "private_torrent"
+	CodePrivateTorrentFile       = "private_torrent_file"
+	CodePrivateNeedsAccount      = "private_needs_account"
+	CodePrivateNoTracker         = "private_no_tracker"
+	CodePrivateTooManyTrackers   = "private_too_many_trackers"
+	CodePrivateMagnet            = "private_magnet"
+	CodePrivateTrackerRefused    = "private_tracker_refused"
+	CodePrivateVerifyUnavailable = "private_verify_unavailable"
+	CodePrivateUnavailable       = "private_unavailable"
+)
+
+// Reasons of a private_torrent refusal (Error.Reason).
+const (
+	// ReasonSignIn: the caller is anonymous; signing in may grant access.
+	ReasonSignIn = "sign_in"
+	// ReasonNoRecord: the caller has no record of adding this torrent with
+	// their own tracker.
+	ReasonNoRecord = "no_record"
+)
+
 // Error is an API error normalized across the three backend dialects.
 type Error struct {
 	// HTTPStatus is the response status code.
@@ -41,8 +64,13 @@ type Error struct {
 	Code string
 	// Message is the human-readable message, when the backend sent one.
 	Message string
+	// Reason refines Code: for private_torrent one of sign_in, no_record,
+	// token_in_query; for private_tracker_refused the tracker's refusal
+	// class; otherwise empty. Branch with errors.As on Code and Reason.
+	Reason string
 	// RetryAfter is the server-requested pause before retrying; non-zero only
-	// on rate-limited responses that carried a Retry-After header.
+	// on responses that carried a Retry-After header (rate limiting,
+	// private_verify_unavailable).
 	RetryAfter time.Duration
 }
 
@@ -77,18 +105,21 @@ func hasCode(err error, code string) bool {
 	return errors.As(err, &ae) && ae.Code == code
 }
 
-// webUIErrorEnvelope is web-ui's error dialect: {"error":{"code","message"}}.
+// webUIErrorEnvelope is web-ui's error dialect:
+// {"error":{"code","message","reason"}}.
 type webUIErrorEnvelope struct {
 	Error struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
+		Reason  string `json:"reason"`
 	} `json:"error"`
 }
 
 // decodeError normalizes a non-2xx response body into *Error. It recognizes,
-// in order: the web-ui envelope, rest-api's {"error":"string"}, RapidAPI's
-// own {"message":"string"}, and anything else (empty 403 from the gateway,
-// HTML from an intermediary) by synthesizing the code from the status.
+// in order: the web-ui envelope, rest-api's {"error","code","reason"} (also
+// what RapidAPI passes through), RapidAPI's own {"message":"string"}, and
+// anything else (empty 403 from the gateway, HTML from an intermediary) by
+// synthesizing the code from the status.
 func decodeError(status int, body []byte, hdr http.Header) *Error {
 	e := &Error{HTTPStatus: status, RetryAfter: retryAfter(hdr)}
 
@@ -96,14 +127,21 @@ func decodeError(status int, body []byte, hdr http.Header) *Error {
 	if err := json.Unmarshal(body, &env); err == nil && env.Error.Code != "" {
 		e.Code = env.Error.Code
 		e.Message = env.Error.Message
+		e.Reason = env.Error.Reason
 		return e
 	}
-	var str struct {
-		Error string `json:"error"`
+	var rest struct {
+		Error  string `json:"error"`
+		Code   string `json:"code"`
+		Reason string `json:"reason"`
 	}
-	if err := json.Unmarshal(body, &str); err == nil && str.Error != "" {
-		e.Message = str.Error
-		e.Code = codeFromStatus(status)
+	if err := json.Unmarshal(body, &rest); err == nil && (rest.Error != "" || rest.Code != "") {
+		e.Message = rest.Error
+		e.Reason = rest.Reason
+		e.Code = rest.Code
+		if e.Code == "" {
+			e.Code = codeFromStatus(status)
+		}
 		return e
 	}
 	var msg struct {
@@ -120,7 +158,7 @@ func decodeError(status int, body []byte, hdr http.Header) *Error {
 
 func codeFromStatus(status int) string {
 	switch status {
-	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
 		return CodeBadRequest
 	case http.StatusUnauthorized:
 		return CodeUnauthorized
