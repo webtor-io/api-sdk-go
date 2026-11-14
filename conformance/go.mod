@@ -4,8 +4,8 @@ go 1.27
 
 require (
 	github.com/webtor-io/api-sdk-go v0.0.0
-	github.com/webtor-io/rest-api v1.0.1-0.20261113162932-c681c05d6c8d
-	github.com/webtor-io/web-ui v0.0.0-20261113190024-3b4e5b6b651a
+	github.com/webtor-io/rest-api v1.0.1-0.20261114135613-818749586025
+	github.com/webtor-io/web-ui v0.0.0-20261114133858-f5cb830c4827
 )
 
 require (
@@ -122,8 +122,8 @@ require (
 	github.com/webtor-io/claims-provider v0.0.0-20251211194931-f79caeeaa72b // indirect
 	github.com/webtor-io/common-services v0.0.0-20260927094256-ddfbf24ea805 // indirect
 	github.com/webtor-io/lazymap v0.0.0-20261021184726-55fd9cba3e7a // indirect
-	github.com/webtor-io/magnet2torrent v1.0.1-0.20261113103955-8de21226ede1 // indirect
-	github.com/webtor-io/torrent-store v0.0.0-20261113110425-65a5e4f57aa3 // indirect
+	github.com/webtor-io/magnet2torrent v1.0.1-0.20261114125219-733d1efe207c // indirect
+	github.com/webtor-io/torrent-store v1.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
